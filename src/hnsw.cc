@@ -57,117 +57,87 @@ using std::vector;
 thread_local VisitedList* visited_list_ = nullptr;
 
 Hnsw::Hnsw() {
-    logger_ = spdlog::get("n2");
-    if (logger_ == nullptr) {
-        logger_ = spdlog::stdout_logger_mt("n2");
-    }
+    InitLogger();
     metric_ = DistanceKind::ANGULAR;
-    dist_cls_ = new AngularDistance();
+    dist_model_ = creatMetricModel(metric_);
 }
 
 Hnsw::Hnsw(int dim, string metric) : data_dim_(dim) {
-    logger_ = spdlog::get("n2");
-    if (logger_ == nullptr) {
-        logger_ = spdlog::stdout_logger_mt("n2");
-    }
+    InitLogger();
     if (metric == "L2" || metric =="euclidean") {
         metric_ = DistanceKind::L2;
-        dist_cls_ = new L2Distance();
     } else if (metric == "angular") {
         metric_ = DistanceKind::ANGULAR;
-        dist_cls_ = new AngularDistance();
     } else {
         throw std::runtime_error("[Error] Invalid configuration value for DistanceMethod: " + metric);
     }
+    dist_model_ = creatMetricModel(metric_);
 }
 
+std::pair<char*, long long> Hnsw::CopyMatrixModel(const Hnsw& other) {
+    char* prevModelPtr = other.model_;
+    long long size = other.model_byte_size_;
+    char* newModelPtr= new char[size];
+    std::copy(prevModelPtr, prevModelPtr + size, newModelPtr);
+    SetValuesFromModel(newModelPtr,prevModelPtr);
+    return std::make_pair(newModelPtr,size);
+}
+
+
 Hnsw::Hnsw(const Hnsw& other) {
-    logger_= spdlog::get("n2");
-    if (logger_ == nullptr) {
-        logger_ = spdlog::stdout_logger_mt("n2");
-    }
-    model_byte_size_ = other.model_byte_size_;
-    model_ = new char[model_byte_size_];
-    std::copy(other.model_, other.model_ + model_byte_size_, model_);
-    SetValuesFromModel(model_);
+    InitLogger();
+    pair<char*, long long> newModelPair = CopyMatrixModel(other);
+    model_ = newModelPair.first;
+    model_byte_size_ = newModelPair.second;
     search_list_.reset(new VisitedList(num_nodes_));
-    if(metric_ == DistanceKind::ANGULAR) {
-        dist_cls_ = new AngularDistance();
-    } else if (metric_ == DistanceKind::L2) {
-        dist_cls_ = new L2Distance();
-    }
+    dist_model_ = creatMetricModel(metric_);
 }
 
 Hnsw::Hnsw(Hnsw& other) {
-    logger_= spdlog::get("n2");
-    if (logger_ == nullptr) {
-        logger_ = spdlog::stdout_logger_mt("n2");
-    }
-    model_byte_size_ = other.model_byte_size_;
-    model_ = new char[model_byte_size_];
-    std::copy(other.model_, other.model_ + model_byte_size_, model_);
-    SetValuesFromModel(model_);
+    InitLogger();
+    const Hnsw& newOther = other;
+    pair<char*, long long> newModelPair = CopyMatrixModel(newOther);
+    model_ = newModelPair.first;
+    model_byte_size_ = newModelPair.second;
     search_list_.reset(new VisitedList(num_nodes_));
-    if(metric_ == DistanceKind::ANGULAR) {
-        dist_cls_ = new AngularDistance();
-    } else if (metric_ == DistanceKind::L2) {
-        dist_cls_ = new L2Distance();
-    }
+    dist_model_ = creatMetricModel(metric_);
 }
 
 Hnsw::Hnsw(Hnsw&& other) noexcept {
-    logger_= spdlog::get("n2");
-    if (logger_ == nullptr) {
-        logger_ = spdlog::stdout_logger_mt("n2");
-    }
+    InitLogger();
     model_byte_size_ = other.model_byte_size_;
     model_ = other.model_;
     other.model_ = nullptr;
     model_mmap_ = other.model_mmap_;
     other.model_mmap_ = nullptr;
-    SetValuesFromModel(model_);
+    SetValuesFromModel(model_,model_);
     search_list_.reset(new VisitedList(num_nodes_));
-    if(metric_ == DistanceKind::ANGULAR) {
-        dist_cls_ = new AngularDistance();
-    } else if (metric_ == DistanceKind::L2) {
-        dist_cls_ = new L2Distance();
-    }
+    dist_model_ = creatMetricModel(metric_);
 }
 
 Hnsw& Hnsw::operator=(const Hnsw& other) {
-    logger_= spdlog::get("n2");
-    if (logger_ == nullptr) {
-        logger_ = spdlog::stdout_logger_mt("n2");
-    }
+    InitLogger();
 
     if(model_) {
         delete [] model_;
         model_ = nullptr;
     }
 
-    if(dist_cls_) {
-       delete dist_cls_;
-       dist_cls_ = nullptr;
+    if(dist_model_) {
+       delete dist_model_;
+       dist_model_ = nullptr;
     }
 
-    model_byte_size_ = other.model_byte_size_;
-    model_ = new char[model_byte_size_];
-    std::copy(other.model_, other.model_ + model_byte_size_, model_);
-    SetValuesFromModel(model_);
+    pair<char*, long long> newModelPair = CopyMatrixModel(other);
+    model_ = newModelPair.first;
+    model_byte_size_ = newModelPair.second;
     search_list_.reset(new VisitedList(num_nodes_));
-    if(metric_ == DistanceKind::ANGULAR) {
-        dist_cls_ = new AngularDistance();
-    } else if (metric_ == DistanceKind::L2) {
-        dist_cls_ = new L2Distance();
-    }
+    dist_model_ = creatMetricModel(metric_);
     return *this;
 }
 
 Hnsw& Hnsw::operator=(Hnsw&& other) noexcept {
-    logger_= spdlog::get("n2");
-    if (logger_ == nullptr) {
-        logger_ = spdlog::stdout_logger_mt("n2");
-    }
+    InitLogger();
     if(model_mmap_) {
         delete model_mmap_;
         model_mmap_ = nullptr;
@@ -176,9 +146,9 @@ Hnsw& Hnsw::operator=(Hnsw&& other) noexcept {
         model_ = nullptr;
     }
 
-    if(dist_cls_) {
-       delete dist_cls_;
-       dist_cls_ = nullptr;
+    if(dist_model_) {
+       delete dist_model_;
+       dist_model_ = nullptr;
     }
 
     model_byte_size_ = other.model_byte_size_;
@@ -186,13 +156,9 @@ Hnsw& Hnsw::operator=(Hnsw&& other) noexcept {
     other.model_ = nullptr;
     model_mmap_ = other.model_mmap_;
     other.model_mmap_ = nullptr;
-    SetValuesFromModel(model_);
+    SetValuesFromModel(model_,model_);
     search_list_.reset(new VisitedList(num_nodes_));
-    if(metric_ == DistanceKind::ANGULAR) {
-        dist_cls_ = new AngularDistance();
-    } else if (metric_ == DistanceKind::L2) {
-        dist_cls_ = new L2Distance();
-    }
+    dist_model_ = creatMetricModel(metric_);
     return *this;
 }
 
@@ -212,8 +178,8 @@ Hnsw::~Hnsw() {
         delete default_rng_;
     }
 
-    if (dist_cls_) {
-        delete dist_cls_;
+    if (dist_model_) {
+        delete dist_model_;
     }
 
     if (selecting_policy_cls_) {
@@ -229,55 +195,60 @@ Hnsw::~Hnsw() {
 void Hnsw::SetConfigs(const vector<pair<string, string> >& configs) {
     bool is_levelmult_set = false;
     for (const auto& c : configs) {
-        if (c.first == "M") {
-            MaxM_ = M_ = (size_t)stoi(c.second);
-        } else if (c.first == "MaxM0") {
-            MaxM0_ = (size_t)stoi(c.second);
-        } else if (c.first == "efConstruction") {
-            efConstruction_ = (size_t)stoi(c.second);
-        } else if (c.first == "NumThread") {
-            num_threads_ = stoi(c.second);
-        } else if (c.first == "Mult") {
-            levelmult_ = stof(c.second);
+        auto name = c.first;
+        auto value = c.second;
+
+        if (name == "M") {
+            MaxM_ = M_ = (size_t)stoi(value);
+        } else if (name == "MaxM0") {
+            MaxM0_ = (size_t)stoi(value);
+        } else if (name == "efConstruction") {
+            efConstruction_ = (size_t)stoi(value);
+        } else if (name == "NumThread") {
+            num_threads_ = stoi(value);
+        } else if (name == "Mult") {
+            levelmult_ = stof(value);
             is_levelmult_set = true;
-        } else if (c.first == "NeighborSelecting") {
+        } else if (name == "NeighborSelecting") {
 
             if(selecting_policy_cls_) delete selecting_policy_cls_;
 
-            if (c.second == "heuristic") {
+            if (value == "heuristic") {
                 selecting_policy_cls_ = new HeuristicNeighborSelectingPolicies(false);
                 is_naive_ = false;
-            } else if (c.second == "heuristic_save_remains") {
+            } else if (value == "heuristic_save_remains") {
                 selecting_policy_cls_ = new HeuristicNeighborSelectingPolicies(true);
                 is_naive_ = false;
-            } else if (c.second == "naive") {
+            } else if (value == "naive") {
                 selecting_policy_cls_ = new NaiveNeighborSelectingPolicies();
                 is_naive_ = true;
             } else {
-                throw std::runtime_error("[Error] Invalid configuration value for NeighborSelecting: " + c.second);
+                throw std::runtime_error("[Error] Invalid configuration value for NeighborSelecting: " + value);
             }
-        } else if (c.first == "GraphMerging") {
-            if (c.second == "skip") {
+        } else if (name == "GraphMerging") {
+            if (value == "skip") {
                 post_ = GraphPostProcessing::SKIP;
-            } else if (c.second == "merge_level0") {
+            } else if (value == "merge_level0") {
                 post_ = GraphPostProcessing::MERGE_LEVEL0;
             } else {
-                throw std::runtime_error("[Error] Invalid configuration value for GraphMerging: " + c.second);
+                throw std::runtime_error("[Error] Invalid configuration value for GraphMerging: " + value);
             }
-        } else if (c.first == "EnsureK") {
-            if (c.second == "true") {
+        } else if (name == "EnsureK") {
+            if (value == "true") {
                 ensure_k_ = true;
             } else {
                 ensure_k_ = false;
             }
         } else {
-            throw std::runtime_error("[Error] Invalid configuration key: " + c.first);
+            throw std::runtime_error("[Error] Invalid configuration key: " + name);
         }
     }
     if (!is_levelmult_set) {
         levelmult_ = 1 / log(1.0*M_);
     }
 }
+
+
 
 int Hnsw::DrawLevel(bool use_default_rng) {
     double r = use_default_rng ? uniform_distribution_(*default_rng_) : uniform_distribution_(rng_);
@@ -339,6 +310,9 @@ void Hnsw::Fit() {
     memory_per_link_level0_ = sizeof(int) * (1 + 1 + MaxM0_);  // "1" for offset pos, 1" for saving num_links
     memory_per_node_level0_ = memory_per_link_level0_ + memory_per_data_;
     long long level0_size = memory_per_node_level0_ * data_.size();
+
+    //InitLogger();
+    logger_->info("model_config_size model_config_size={} level0_size={} higher_level_size={}", model_config_size,level0_size,higher_level_size);
 
     model_byte_size_ = model_config_size + level0_size + higher_level_size;
     model_ = new char[model_byte_size_];
@@ -468,19 +442,12 @@ bool Hnsw::LoadModel(const string& fname, const bool use_mmap) {
     model_level0_ = model_ + model_config_size;
     model_higher_level_ = model_level0_ + level0_size;
     search_list_.reset(new VisitedList(num_nodes_));
-    if(dist_cls_) {
-        delete dist_cls_;
+    if(dist_model_) {
+        delete dist_model_;
     }
-    switch (metric_) {
-        case DistanceKind::ANGULAR:
-            dist_cls_ = new AngularDistance();
-            break;
-        case DistanceKind::L2:
-            dist_cls_ = new L2Distance();
-            break;
-        default:
-            throw std::runtime_error("[Error] Unknown distance metric. ");
-    }
+
+    dist_model_ = creatMetricModel(metric_);
+
     return true;
 }
 
@@ -511,13 +478,8 @@ void Hnsw::AddData(const std::vector<float>& data) {
         throw std::runtime_error("[Error] Invalid dimension data inserted: " + to_string(data.size()) + ", Predefined dimension: " + to_string(data_dim_));
     }
 
-    if(metric_ == DistanceKind::ANGULAR) {
-        vector<float> data_copy(data);
-        NormalizeVector(data_copy);
-        data_.emplace_back(data_copy);
-    } else {
-        data_.emplace_back(data);
-    }
+    data_.emplace_back(dist_model_->initQvec(data))  ;
+
 }
 
 void Hnsw::Insert(HnswNode* qnode) {
@@ -531,9 +493,9 @@ void Hnsw::Insert(HnswNode* qnode) {
     const float* qraw = &qvec[0];
     float PORTABLE_ALIGN32 TmpRes[8];
     if (cur_level < maxlevel_copy) {
-        _mm_prefetch(&dist_cls_, _MM_HINT_T0);
+        _mm_prefetch(&dist_model_, _MM_HINT_T0);
         HnswNode* cur_node = enterpoint;
-        float d = dist_cls_->Evaluate(qraw, (float*)&cur_node->GetData()[0], data_dim_, TmpRes);
+        float d = dist_model_->Evaluate(qraw, (float*)&cur_node->GetData()[0], data_dim_, TmpRes);
         float cur_dist = d;
         for (int i = maxlevel_copy; i > cur_level; --i) {
             bool changed = true;
@@ -546,7 +508,7 @@ void Hnsw::Insert(HnswNode* qnode) {
                 }
 
                 for (auto iter = neighbors.begin(); iter != neighbors.end(); ++iter) {
-                    d = dist_cls_->Evaluate(qraw, &(*iter)->GetData()[0], data_dim_, TmpRes);
+                    d = dist_model_->Evaluate(qraw, &(*iter)->GetData()[0], data_dim_, TmpRes);
                     if (d < cur_dist) {
                         cur_dist = d;
                         cur_node = (*iter);
@@ -561,7 +523,7 @@ void Hnsw::Insert(HnswNode* qnode) {
     for (int i = std::min(maxlevel_copy, cur_level); i >= 0; --i) {
         priority_queue<FurtherFirst> temp_res;
         SearchAtLayer(qvec, enterpoint, i, efConstruction_, temp_res);
-        selecting_policy_cls_->Select(M_, temp_res, data_dim_, dist_cls_);
+        selecting_policy_cls_->Select(M_, temp_res, data_dim_, dist_model_);
         while (temp_res.size() > 0) {
             auto* top_node = temp_res.top().GetNode();
             temp_res.pop();
@@ -584,10 +546,10 @@ void Hnsw::Link(HnswNode* source, HnswNode* target, int level, bool is_naive, si
     if (!shrink) return;
     float PORTABLE_ALIGN32 TmpRes[8];
     if (is_naive) {
-        float max = dist_cls_->Evaluate((float*)&source->GetData()[0], (float*)&neighbors[0]->GetData()[0], dim, TmpRes);
+        float max = dist_model_->Evaluate((float*)&source->GetData()[0], (float*)&neighbors[0]->GetData()[0], dim, TmpRes);
         int maxi = 0;
         for (size_t i = 1; i < neighbors.size(); ++i) {
-                float curd = dist_cls_->Evaluate((float*)&source->GetData()[0], (float*)&neighbors[i]->GetData()[0], dim, TmpRes);
+                float curd = dist_model_->Evaluate((float*)&source->GetData()[0], (float*)&neighbors[i]->GetData()[0], dim, TmpRes);
                 if (curd > max) {
                     max = curd;
                     maxi = i;
@@ -601,9 +563,9 @@ void Hnsw::Link(HnswNode* source, HnswNode* target, int level, bool is_naive, si
         }
 
         for (auto iter = neighbors.begin(); iter != neighbors.end(); ++iter) {
-            tempres.emplace((*iter), dist_cls_->Evaluate((float*)&source->data_->GetData()[0], (float*)&(*iter)->GetData()[0], dim, TmpRes));
+            tempres.emplace((*iter), dist_model_->Evaluate((float*)&source->data_->GetData()[0], (float*)&(*iter)->GetData()[0], dim, TmpRes));
         }
-        selecting_policy_cls_->Select(tempres.size() - 1, tempres, dim, dist_cls_);
+        selecting_policy_cls_->Select(tempres.size() - 1, tempres, dim, dist_model_);
         neighbors.clear();
         while (tempres.size()) {
             neighbors.emplace_back(tempres.top().GetNode());
@@ -628,11 +590,11 @@ void Hnsw::MergeEdgesOfTwoGraphs(const vector<HnswNode*>& another_nodes) {
         const std::vector<float>& ivec = data_[i].GetData();
         float PORTABLE_ALIGN32 TmpRes[8];
         for (int cur : merged_neighbor_id_set) {
-            temp_res.emplace(nodes_[cur], dist_cls_->Evaluate((float*)&data_[cur].GetData()[0], (float*)&ivec[0], data_dim_, TmpRes));
+            temp_res.emplace(nodes_[cur], dist_model_->Evaluate((float*)&data_[cur].GetData()[0], (float*)&ivec[0], data_dim_, TmpRes));
         }
 
         // Post Heuristic
-        post_policy_cls_->Select(MaxM0_, temp_res, data_dim_, dist_cls_);
+        post_policy_cls_->Select(MaxM0_, temp_res, data_dim_, dist_model_);
         vector<HnswNode*> merged_neighbors = vector<HnswNode*>();
         while (!temp_res.empty()) {
             merged_neighbors.emplace_back(temp_res.top().GetNode());
@@ -677,24 +639,21 @@ void Hnsw::SearchById_(int cur_node_id, float cur_dist, const float* qraw, size_
     QueueItem e;
     float maxKey = cur_dist;
     size_t total_size = 1;
-    while (dh.size() > 0 && visited_nodes.size() < (ef_search >> 1)) {
+    int max_emplace_size = ef_search >> 1;
+    while (dh.size() > 0 && visited_nodes.size() < max_emplace_size) {
         e = dh.top();
         dh.pop();
         cur_node_id = e.data;
-
         visited_nodes.emplace(e.key, e.data);
-
-        float topKey = maxKey;
-
         int *data = (int*)(model_level0_ + cur_node_id*memory_per_node_level0_ + sizeof(int));
         int size = *data;
         for (int j = 1; j <= size; ++j) {
             tnum = *(data + j);
-            _mm_prefetch(dist_cls_, _MM_HINT_T0);
+            _mm_prefetch(dist_model_, _MM_HINT_T0);
             if (visited[tnum] != mark) {
                 visited[tnum] = mark;
-                d = dist_cls_->Evaluate(qraw, (float*)(model_level0_ + tnum*memory_per_node_level0_ + memory_per_link_level0_), data_dim_, TmpRes);
-                if (d < topKey || total_size < ef_search) {
+                d = dist_model_->Evaluate(qraw, (float*)(model_level0_ + tnum*memory_per_node_level0_ + memory_per_link_level0_), data_dim_, TmpRes);
+                if (d < maxKey || total_size < ef_search) {
                     q.emplace(QueueItem(d, tnum));
                     ++total_size;
                 }
@@ -734,9 +693,26 @@ void Hnsw::SearchById_(int cur_node_id, float cur_dist, const float* qraw, size_
     }
 }
 
-bool Hnsw::SetValuesFromModel(char* model) {
-    if(model) {
-        char* ptr = model;
+void Hnsw::InitLogger() {
+    logger_ = spdlog::get("n2");
+        if (logger_ == nullptr) {
+            logger_ = spdlog::stdout_logger_mt("n2");
+        }
+}
+BaseDistance* Hnsw::creatMetricModel(DistanceKind metric) {
+    BaseDistance* bd = nullptr;
+    if(metric == DistanceKind::ANGULAR) {
+        bd = new AngularDistance();
+    } else if (metric_ == DistanceKind::L2) {
+        bd = new L2Distance();
+    }
+    return bd;
+}
+
+
+bool Hnsw::SetValuesFromModel(char* newModel, char* prevModel) {
+    if(newModel) {
+        char* ptr = newModel;
         ptr = GetValueAndIncPtr<size_t>(ptr, M_);
         ptr = GetValueAndIncPtr<size_t>(ptr, MaxM_);
         ptr = GetValueAndIncPtr<size_t>(ptr, MaxM0_);
@@ -755,60 +731,38 @@ bool Hnsw::SetValuesFromModel(char* model) {
         ptr = GetValueAndIncPtr<long long>(ptr, level0_offset_);
         long long level0_size = memory_per_node_level0_ * num_nodes_;
         long long model_config_size = GetModelConfigSize();
-        model_level0_ = model_ + model_config_size;
+        model_level0_ = prevModel + model_config_size;
         model_higher_level_ = model_level0_ + level0_size;
         return true;
     }
     return false;
 }
 void Hnsw::SearchByVector(const vector<float>& qvec, size_t k, size_t ef_search, vector<pair<int, float>>& result) {
+
     if (model_ == nullptr) throw std::runtime_error("[Error] Model has not loaded!");
+
+
     float PORTABLE_ALIGN32 TmpRes[8];
-    const float* qraw = nullptr;
 
-    if (ef_search < 0) {
-        ef_search = 50 * k;
-    }
+    vector<float> qvec_copy = dist_model_->initQvec(qvec);
+    const float* qraw = &qvec_copy[0];
 
-    vector<float> qvec_copy(qvec);
-    if(metric_ == DistanceKind::ANGULAR) {
-        NormalizeVector(qvec_copy);
-    }
-
-    qraw = &qvec_copy[0];
-    _mm_prefetch(&dist_cls_, _MM_HINT_T0);
-    int maxlevel = maxlevel_;
+    _mm_prefetch(&dist_model_, _MM_HINT_T0);
     int cur_node_id = enterpoint_id_;
-    float cur_dist = dist_cls_->Evaluate(qraw, (float *)(model_level0_ + cur_node_id*memory_per_node_level0_ + memory_per_link_level0_), data_dim_, TmpRes);
-    float d;
+    float cur_dist = dist_model_->Evaluate(qraw, (float *)(model_level0_ + cur_node_id * memory_per_node_level0_ + memory_per_link_level0_), data_dim_, TmpRes);
 
     vector<pair<int, float> > path;
     if (ensure_k_) path.emplace_back(cur_node_id, cur_dist);
 
-    bool changed;
-    for (int i = maxlevel; i > 0; --i) {
-        changed = true;
-        while (changed) {
-            changed = false;
-            char* level_offset = model_level0_ + cur_node_id*memory_per_node_level0_;
-            int offset = *((int*)(level_offset));
-            char* level_base_offset = model_higher_level_ + offset * memory_per_node_higher_level_;
-            int *data = (int*)(level_base_offset + (i-1) * memory_per_node_higher_level_);
-            int size = *data;
+    pair<int, int> p  = dist_model_->TraverseLevels(maxlevel_,model_level0_,memory_per_node_level0_,memory_per_node_higher_level_,model_higher_level_,
+       memory_per_link_level0_,
+       cur_dist,cur_node_id,
+       qraw,data_dim_,ensure_k_,path,TmpRes);
 
-            for (int j = 1; j <= size; ++j) {
-                int tnum = *(data + j);
-                d = (dist_cls_->Evaluate(qraw, (float *)(model_level0_ + tnum*memory_per_node_level0_ + memory_per_link_level0_), data_dim_, TmpRes));
-                if (d < cur_dist) {
-                    cur_dist = d;
-                    cur_node_id = tnum;
-                    offset = *((int*)(model_level0_ + cur_node_id*memory_per_node_level0_));
-                    changed = true;
-                    if (ensure_k_) path.emplace_back(cur_node_id, cur_dist);
-                 }
-            }
-        }
-    }
+    cur_dist = p.first;
+    cur_node_id = p.second;
+
+    ef_search = ef_search < 0 ? 50 * k: ef_search;
 
     if (ensure_k_) {
         while (result.size() < k && !path.empty()) {
@@ -831,11 +785,11 @@ void Hnsw::SearchById(int id, size_t k, size_t ef_search, vector<pair<int, float
 
 void Hnsw::SearchAtLayer(const std::vector<float>& qvec, HnswNode* enterpoint, int level, size_t ef, priority_queue<FurtherFirst>& result) {
     // TODO: check Node 12bytes => 8bytes
-    _mm_prefetch(&dist_cls_, _MM_HINT_T0);
+    _mm_prefetch(&dist_model_, _MM_HINT_T0);
     float PORTABLE_ALIGN32 TmpRes[8];
     const float* qraw = &qvec[0];
     priority_queue<CloserFirst> candidates;
-    float d = dist_cls_->Evaluate(qraw, (float*)&(enterpoint->GetData()[0]), data_dim_, TmpRes);
+    float d = dist_model_->Evaluate(qraw, (float*)&(enterpoint->GetData()[0]), data_dim_, TmpRes);
     result.emplace(enterpoint, d);
     candidates.emplace(enterpoint, d);
 
@@ -860,7 +814,7 @@ void Hnsw::SearchAtLayer(const std::vector<float>& qvec, HnswNode* enterpoint, i
             if (visited[fid] != mark) {
                 _mm_prefetch((char*)&(neighbors[j]->GetData()), _MM_HINT_T0);
                 visited[fid] = mark;
-                d = dist_cls_->Evaluate(qraw, (float*)&neighbors[j]->GetData()[0], data_dim_, TmpRes);
+                d = dist_model_->Evaluate(qraw, (float*)&neighbors[j]->GetData()[0], data_dim_, TmpRes);
                 if (result.size() < ef || result.top().GetDistance() > d) {
                     result.emplace(neighbors[j], d);
                     candidates.emplace(neighbors[j], d);

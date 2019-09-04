@@ -18,12 +18,76 @@
 #include <xmmintrin.h>
 
 #include "n2/distance.h"
-
+#include <vector>
 namespace n2 {
+
 
 BaseDistance::~BaseDistance() {
 
 }
+::std::pair<int, float> BaseDistance::TraverseLevels(int level,char* base_offset, long long memory_per_node_level0_, long long memory_per_node_higher_level_,char* model_higher_level_,
+                                                    long long memory_per_link_level0_,
+
+                                                    float cur_dist, int cur_node_id,const float* qraw,size_t data_dim_,bool ensure_k_,vector<pair<int, float> > path, float  *  __restrict TmpRes) {
+
+    bool better_found;
+    for (int i = level; i > 0; --i) {
+        better_found = false;
+        do {
+            int offset = *((int*)(base_offset + cur_node_id * memory_per_node_level0_));
+            char* level_base_ptr = model_higher_level_ + offset * memory_per_node_higher_level_;
+            int* data = (int*)(level_base_ptr + (i-1) * memory_per_node_higher_level_);
+            int node_size = *data;
+
+            ::std::cout << "cur_node_id=" <<cur_node_id<< " memory_per_node_level0_="<<memory_per_node_level0_;
+            ::std::cout << "memory_per_node_higher_level_=" <<memory_per_node_higher_level_<< " memory_per_link_level0_="<<memory_per_link_level0_;
+            ::std::cout << "offset=" <<offset<< " node_size="<<node_size;
+
+            for (int j = 1; j <= node_size; ++j) {
+                int tnum = *(data + j);
+                float eval_dist = (Evaluate(qraw, (float *)(base_offset + tnum * memory_per_node_level0_ + memory_per_link_level0_), data_dim_, TmpRes));
+                if (eval_dist < cur_dist) {
+                    better_found = true;
+                    cur_dist = eval_dist;
+                    cur_node_id = tnum;
+                    if (ensure_k_) path.emplace_back(cur_node_id, cur_dist);
+                 }
+            }
+        } while (better_found);
+    }
+
+
+   return std::make_pair(cur_dist, cur_node_id);
+}
+
+
+
+const vector<float>  L2Distance::initQvec(vector<float> qvec) const{
+    vector<float> qvec_copy(qvec);
+    return qvec_copy;
+}
+
+const vector<float> AngularDistance::initQvec(vector<float> qvec)  const{
+    vector<float> qvec_copy(qvec);
+
+
+    float sum = std::inner_product(qvec_copy.begin(), qvec_copy.end(), qvec_copy.begin(), 0.0);
+    if (sum != 0.0) {
+       sum = 1 / sqrt(sum);
+       std::transform(qvec_copy.begin(), qvec_copy.end(), qvec_copy.begin(), std::bind1st(std::multiplies<float>(), sum));
+    }
+    return qvec_copy;
+}
+
+/*
+void AngularDistance::NormalizeVector(vector<float>& vec) {
+       float sum = std::inner_product(vec.begin(), vec.end(), vec.begin(), 0.0);
+       if (sum != 0.0) {
+           sum = 1 / sqrt(sum);
+           std::transform(vec.begin(), vec.end(), vec.begin(), std::bind1st(std::multiplies<float>(), sum));
+       }
+    }
+*/
 
 float L2Distance::Evaluate(const float* __restrict pVect1, const float*  __restrict pVect2, size_t qty, float  *  __restrict TmpRes) const {
     size_t qty4  = qty/4;

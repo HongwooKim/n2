@@ -70,6 +70,7 @@ public:
     Hnsw& operator=(Hnsw&& other) noexcept;
     void SetConfigs(const std::vector<std::pair<std::string, std::string> >& configs);
 
+
     bool SaveModel(const std::string& fname) const;
     bool LoadModel(const std::string& fname, const bool use_mmap=true);
     void UnloadModel();
@@ -78,6 +79,7 @@ public:
 
     void Fit();
     void Build(int M = -1, int M0 = -1, int ef_construction = -1, int n_threads = -1, float mult = -1, NeighborSelectingPolicy neighbor_selecting = NeighborSelectingPolicy::HEURISTIC, GraphPostProcessing graph_merging = GraphPostProcessing::SKIP, bool ensure_k = false);
+
 
     void SearchByVector(const std::vector<float>& qvec, size_t k, size_t ef_search,
                         std::vector<std::pair<int, float> >& result);
@@ -89,6 +91,9 @@ public:
     void PrintConfigs() const;
 
 private:
+    void InitLogger();
+    BaseDistance* creatMetricModel(DistanceKind metric);
+    std::pair<char*,long long> CopyMatrixModel(const Hnsw& other);
     int DrawLevel(bool use_default_rng=false);
 
     void BuildGraph(bool reverse);
@@ -102,7 +107,7 @@ private:
                      size_t k, size_t ef_search,
                      std::vector<std::pair<int, float> >& result);
 
-    bool SetValuesFromModel(char* model);
+    bool SetValuesFromModel(char* model,char* oldModel);
     void NormalizeVector(std::vector<float>& vec);
     void MergeEdgesOfTwoGraphs(const std::vector<HnswNode*>& another_nodes);
     size_t GetModelConfigSize() const;
@@ -133,7 +138,7 @@ private:
     bool is_naive_ = false;
     GraphPostProcessing post_ = GraphPostProcessing::SKIP;
 
-    BaseDistance* dist_cls_ = nullptr;
+    BaseDistance* dist_model_ = nullptr;
     BaseNeighborSelectingPolicies* selecting_policy_cls_ = new HeuristicNeighborSelectingPolicies(false);
     BaseNeighborSelectingPolicies* post_policy_cls_ = new HeuristicNeighborSelectingPolicies(true);
     std::uniform_real_distribution<double> uniform_distribution_{0.0, 1.0};
